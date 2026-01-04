@@ -1,0 +1,415 @@
+class MCQDatabase {
+    constructor() {
+        this.dbName = 'MCQAppDB';
+        this.version = 3;
+        this.db = null;
+        this.init();
+    }
+
+    async init() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.version);
+            
+            request.onerror = (event) => {
+                console.error("IndexedDB error:", event.target.error);
+                reject(event.target.error);
+            };
+            
+            request.onsuccess = (event) => {
+                this.db = event.target.result;
+                console.log("Database opened successfully");
+                resolve(this.db);
+            };
+            
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                
+                // Create questions store
+                if (!db.objectStoreNames.contains('questions')) {
+                    const questionStore = db.createObjectStore('questions', { keyPath: 'id', autoIncrement: true });
+                    questionStore.createIndex('category', 'category', { unique: false });
+                    questionStore.createIndex('lastAsked', 'lastAsked', { unique: false });
+                    questionStore.createIndex('difficulty', 'difficulty', { unique: false });
+                }
+                
+                // Create quiz results store
+                if (!db.objectStoreNames.contains('quizResults')) {
+                    const resultStore = db.createObjectStore('quizResults', { keyPath: 'id', autoIncrement: true });
+                    resultStore.createIndex('date', 'date', { unique: false });
+                    resultStore.createIndex('score', 'score', { unique: false });
+                }
+                
+                // Create app settings store
+                if (!db.objectStoreNames.contains('settings')) {
+                    const settingsStore = db.createObjectStore('settings', { keyPath: 'key' });
+                }
+                
+                // Create performance store
+                if (!db.objectStoreNames.contains('performance')) {
+                    const performanceStore = db.createObjectStore('performance', { keyPath: 'questionId' });
+                    performanceStore.createIndex('timesAsked', 'timesAsked', { unique: false });
+                    performanceStore.createIndex('timesCorrect', 'timesCorrect', { unique: false });
+                }
+            };
+        });
+    }
+
+    // Import CSV function
+    async importCSV(csvText, category = 'default') {
+        return new Promise((resolve, reject) => {
+            const lines = csvText.split('\n');
+            const headers = lines[0].split(',').map(h => h.trim());
+            
+            const questions = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                if (!lines[i].trim()) continue;
+                
+                const values = this.parseCSVLine(lines[i]);
+                const question = {
+                    question: values[headers.indexOf('Question')] || '',
+                    optionA: values[headers.indexOf('OptionA')] || '',
+                    optionB: values[headers.indexOf('OptionB')] || '',
+                    optionC: values[headers.indexOf('OptionC')] || '',
+                    optionD: values[headers.indexOf('OptionD')] || '',
+                    correctAnswer: values[headers.indexOf('Correct Answer')] || 'A',
+                    explanation: values[headers.indexOf('Explanation')] || '',
+                    category: category,
+                    difficulty: 'medium',
+                    timesAsked: 0,
+                    timesCorrect: 0,
+                    lastAsked: null,
+                    addedDate: new Date().toISOString()
+                };
+                
+                questions.push(question);
+            }
+            
+            // Add questions to database
+            this.addQuestions(questions).then(resolve).catch(reject);
+        });
+    }
+
+    parseCSVLine(line) {
+        const values = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            
+            if (char === '"') {
+                inQuotes = !inQuotes;
+            } else if (char === ',' && !inQuotes) {
+                values.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        
+        values.push(current.trim());
+        return values;
+    }
+
+    async addQuestions(questions) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['questions'], 'readwrite');
+            const store = transaction.objectStore('questions');
+            
+            let added = 0;
+            let errors = 0;
+            
+            questions.forEach(question => {
+                const request = store.add(question);
+                
+                request.onsuccess = () => {
+                    added++;
+                    if (added + errors === questions.length) {
+                        resolve({ added, errors });
+                    }
+                };
+                
+                request.onerror = () => {
+                    errors++;
+                    if (added + errors === questions.length) {
+                        resolve({ added, errors });
+                    }
+                };
+            });
+        });
+    }
+
+    async getRandomQuestions(count = 25, category = null) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['questions', 'performance'], 'readonly');
+            const questionStore = transaction.objectStore('questions');
+            const performanceStore = transaction.objectStore('performance');
+            
+            // Get all questions
+            const getAllRequest = questionStore.getAll();
+            
+            getAllRequest.onsuccess = async (event) => {
+                let allQuestions = event.target.result;
+                
+                // Filter by category if specified
+                if (category) {
+                    allQuestions = allQuestions.filter(q => q.category === category);
+                }
+                
+                // Get performance data for each question
+                const questionsWithPerformance = await Promise.all(
+                    allQuestions.map(async (q) => {
+                        const perfRequest = performanceStore.get(q.id);
+                        return new Promise((resolve) => {
+                            perfRequest.onsuccess = (e) => {
+                                const perf = e.target.result || { timesAsked: 0, timesCorrect: 0 };
+                                resolve({
+                                    ...q,
+                                    timesAsked: perf.timesAsked || 0,
+                                    timesCorrect: perf.timesCorrect || 0,
+                                    accuracy: perf.timesAsked > 0 ? (perf.timesCorrect / perf.timesAsked) : 0
+                                });
+                            };
+                        });
+                    })
+                );
+                
+                // Apply weighted randomization logic (similar to your GAS logic)
+                const selectedQuestions = this.weightedRandomSelection(questionsWithPerformance, count);
+                resolve(selectedQuestions);
+            };
+            
+            getAllRequest.onerror = (event) => {
+                reject(event.target.error);
+            };
+        });
+    }
+
+    weightedRandomSelection(questions, count) {
+        // Similar logic to your GAS getRandomQuestions function
+        const now = Date.now();
+        
+        // Calculate priority scores
+        const questionsWithScores = questions.map(q => {
+            let priorityScore = 0;
+            
+            if (q.timesAsked === 0) {
+                priorityScore = 100;
+            } else if (q.timesAsked === 1 && q.timesCorrect === 0) {
+                priorityScore = 90;
+            } else {
+                const accuracy = q.timesAsked > 0 ? q.timesCorrect / q.timesAsked : 0.5;
+                const accuracyWeight = (1 - accuracy) * 60;
+                
+                // Recency scoring
+                const lastAsked = q.lastAsked ? new Date(q.lastAsked).getTime() : 0;
+                const daysSinceLastAsked = lastAsked > 0 ? (now - lastAsked) / (1000 * 60 * 60 * 24) : 30;
+                const recencyScore = Math.min(1, daysSinceLastAsked / 30);
+                const recencyWeight = recencyScore * 30;
+                
+                // Frequency penalty
+                const frequencyPenalty = Math.min(20, q.timesAsked * 2);
+                
+                priorityScore = accuracyWeight + recencyWeight - frequencyPenalty;
+                priorityScore = Math.max(10, priorityScore);
+            }
+            
+            // Boost for wrong answers
+            if (q.timesAsked > 0 && q.timesCorrect === 0) {
+                priorityScore += 20;
+            }
+            
+            return { ...q, priorityScore };
+        });
+        
+        // Sort by priority
+        questionsWithScores.sort((a, b) => b.priorityScore - a.priorityScore);
+        
+        // Weighted random selection
+        const selected = [];
+        const totalScore = questionsWithScores.reduce((sum, q) => sum + q.priorityScore, 0);
+        
+        for (let i = 0; i < Math.min(count, questionsWithScores.length); i++) {
+            let random = Math.random() * totalScore;
+            let cumulative = 0;
+            
+            for (const q of questionsWithScores) {
+                cumulative += q.priorityScore;
+                if (random <= cumulative && !selected.includes(q)) {
+                    selected.push(q);
+                    break;
+                }
+            }
+        }
+        
+        // Shuffle final selection
+        return this.shuffleArray(selected);
+    }
+
+    shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
+    async updateQuestionPerformance(questionId, wasCorrect) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['performance', 'questions'], 'readwrite');
+            const perfStore = transaction.objectStore('performance');
+            const questionStore = transaction.objectStore('questions');
+            
+            // Get current performance
+            const getRequest = perfStore.get(questionId);
+            
+            getRequest.onsuccess = (e) => {
+                let perf = e.target.result || { questionId, timesAsked: 0, timesCorrect: 0 };
+                
+                // Update performance
+                perf.timesAsked++;
+                if (wasCorrect) perf.timesCorrect++;
+                perf.lastAttempt = new Date().toISOString();
+                
+                // Update performance store
+                const putRequest = perfStore.put(perf);
+                
+                // Update question's lastAsked
+                const questionGet = questionStore.get(questionId);
+                questionGet.onsuccess = (ev) => {
+                    const question = ev.target.result;
+                    if (question) {
+                        question.lastAsked = new Date().toISOString();
+                        questionStore.put(question);
+                    }
+                };
+                
+                putRequest.onsuccess = () => resolve(perf);
+                putRequest.onerror = () => reject(putRequest.error);
+            };
+            
+            getRequest.onerror = () => reject(getRequest.error);
+        });
+    }
+
+    async saveQuizResult(result) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['quizResults'], 'readwrite');
+            const store = transaction.objectStore('quizResults');
+            
+            const quizData = {
+                date: new Date().toISOString(),
+                score: result.score,
+                total: result.total,
+                percentage: result.percentage,
+                duration: result.duration || '10:00',
+                questions: result.questions || [],
+                category: result.category || 'general'
+            };
+            
+            const request = store.add(quizData);
+            
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getProgressStats() {
+        return new Promise(async (resolve, reject) => {
+            try {
+                const [totalQuestions, quizResults, performanceData] = await Promise.all([
+                    this.getTotalQuestions(),
+                    this.getQuizResults(),
+                    this.getPerformanceSummary()
+                ]);
+                
+                const stats = {
+                    totalQuestions,
+                    totalAsked: performanceData.totalAsked,
+                    totalCorrect: performanceData.totalCorrect,
+                    coverage: performanceData.coverage,
+                    accuracy: performanceData.accuracy,
+                    quizHistory: quizResults,
+                    weakAreas: performanceData.weakAreas
+                };
+                
+                resolve(stats);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    async getTotalQuestions() {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['questions'], 'readonly');
+            const store = transaction.objectStore('questions');
+            const countRequest = store.count();
+            
+            countRequest.onsuccess = () => resolve(countRequest.result);
+            countRequest.onerror = () => reject(countRequest.error);
+        });
+    }
+
+    async getQuizResults(limit = 50) {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['quizResults'], 'readonly');
+            const store = transaction.objectStore('quizResults');
+            const index = store.index('date');
+            
+            // Get recent results
+            const request = index.openCursor(null, 'prev');
+            const results = [];
+            
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor && results.length < limit) {
+                    results.push(cursor.value);
+                    cursor.continue();
+                } else {
+                    resolve(results);
+                }
+            };
+            
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getPerformanceSummary() {
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['performance'], 'readonly');
+            const store = transaction.objectStore('performance');
+            const request = store.getAll();
+            
+            request.onsuccess = (event) => {
+                const allPerf = event.target.result;
+                
+                const summary = allPerf.reduce((acc, perf) => {
+                    acc.totalAsked += perf.timesAsked;
+                    acc.totalCorrect += perf.timesCorrect;
+                    
+                    if (perf.timesAsked > 0 && perf.timesCorrect === 0) {
+                        acc.neverCorrect++;
+                    }
+                    
+                    return acc;
+                }, { totalAsked: 0, totalCorrect: 0, neverCorrect: 0 });
+                
+                summary.coverage = await this.getTotalQuestions().then(total => {
+                    return total > 0 ? Math.min(100, Math.round((summary.totalAsked / total) * 100)) : 0;
+                });
+                
+                summary.accuracy = summary.totalAsked > 0 ? 
+                    Math.round((summary.totalCorrect / summary.totalAsked) * 100) : 0;
+                
+                resolve(summary);
+            };
+            
+            request.onerror = () => reject(request.error);
+        });
+    }
+}
+
+// Create global database instance
+const mcqDB = new MCQDatabase();

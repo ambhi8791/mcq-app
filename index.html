@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Offline MCQ Master</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="assets/icons/icon-192.png">
+</head>
+<body>
+    <div id="app">
+        <!-- Navigation -->
+        <nav class="nav-bar">
+            <div class="nav-logo">
+                <span>📚</span>
+                <span>MCQ Master</span>
+            </div>
+            <div class="nav-links">
+                <a href="#home" class="nav-link" data-view="home">🏠 Home</a>
+                <a href="#quiz" class="nav-link" data-view="quiz">🎯 Quiz</a>
+                <a href="#progress" class="nav-link" data-view="progress">📊 Progress</a>
+                <a href="#import" class="nav-link" data-view="import">📥 Import</a>
+            </div>
+        </nav>
+
+        <!-- Home View -->
+        <div id="home-view" class="view-container" data-view-container>
+            <div class="home-header">
+                <h1>🎓 MCQ Master</h1>
+                <p>Smart offline exam preparation with 25-question quizzes</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">📚</div>
+                    <div class="stat-value" id="total-questions">0</div>
+                    <div class="stat-label">Total Questions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-value" id="coverage">0%</div>
+                    <div class="stat-label">Coverage</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-value" id="accuracy">0%</div>
+                    <div class="stat-label">Accuracy</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📝</div>
+                    <div class="stat-value" id="quizzes-taken">0</div>
+                    <div class="stat-label">Quizzes Taken</div>
+                </div>
+            </div>
+
+            <div class="progress-section">
+                <h2>📈 Your Progress</h2>
+                <div class="progress-bar-container">
+                    <div class="progress-label">
+                        <span>Question Bank Coverage</span>
+                        <span id="coverage-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="coverage-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-label">
+                        <span>Overall Accuracy</span>
+                        <span id="accuracy-percent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="accuracy-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="quick-stats">
+                <div class="stat-row">
+                    <div class="stat-item">
+                        <span class="stat-name">Questions Attempted:</span>
+                        <span class="stat-value" id="total-attempted">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-name">Correct Answers:</span>
+                        <span class="stat-value" id="total-correct">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-name">Readiness Score:</span>
+                        <span class="stat-value" id="readiness-score">0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="actions-section">
+                <button id="start-quiz-btn" class="btn primary" data-action="start-quiz">
+                    🎯 Start New Quiz (25 Questions)
+                </button>
+                <button class="btn secondary" data-view="progress">
+                    📊 View Detailed Analytics
+                </button>
+                <button class="btn" data-view="import">
+                    📥 Import Questions
+                </button>
+            </div>
+
+            <div class="recent-quizzes">
+                <h3>📋 Recent Quizzes</h3>
+                <div id="recent-quizzes-list"></div>
+            </div>
+        </div>
+
+        <!-- Quiz View -->
+        <div id="quiz-view" class="view-container" data-view-container style="display: none;">
+            <div class="quiz-header">
+                <div>
+                    <h2>🎯 MCQ Quiz</h2>
+                    <p>25 Questions • 10 Minutes</p>
+                </div>
+                <div class="timer-display" id="quiz-timer">10:00</div>
+            </div>
+
+            <div class="quiz-navigation">
+                <div class="nav-left">
+                    <button id="prev-question-btn" class="btn" onclick="prevQuestion()">◀ Previous</button>
+                </div>
+                <div class="nav-center">
+                    <span id="current-question-counter">1 of 25</span>
+                </div>
+                <div class="nav-right">
+                    <button id="next-question-btn" class="btn" onclick="nextQuestion()">Next ▶</button>
+                </div>
+            </div>
+
+            <div class="quiz-progress">
+                <div class="progress-info">
+                    <span>Progress: <span id="answered-counter">0</span>/<span id="total-questions-counter">25</span></span>
+                    <span id="quiz-progress-text">0%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="quiz-progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="question-container">
+                <!-- Questions will be loaded here -->
+            </div>
+
+            <div class="question-indicators" id="question-indicators">
+                <!-- Question indicators will be loaded here -->
+            </div>
+
+            <div class="quiz-footer">
+                <button class="btn" data-view="home">🏠 Exit Quiz</button>
+                <div class="quiz-actions">
+                    <button class="btn warning" id="mark-review-btn">🚩 Mark for Review</button>
+                    <button class="btn success" id="submit-quiz-btn" onclick="submitQuiz()">✅ Submit Quiz</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress View -->
+        <div id="progress-view" class="view-container" data-view-container style="display: none;">
+            <!-- Progress content will be loaded here -->
+        </div>
+
+        <!-- Import View -->
+        <div id="import-view" class="view-container" data-view-container style="display: none;">
+            <!-- Import content will be loaded here -->
+        </div>
+
+        <!-- Results View -->
+        <div id="results-view" class="view-container" data-view-container style="display: none;">
+            <!-- Results will be loaded here -->
+        </div>
+    </div>
+
+    <script src="js/db.js"></script>
+    <script src="js/quiz-logic.js"></script>
+    <script src="js/scheduler.js"></script>
+    <script src="js/app.js"></script>
+
+    <script>
+        // Initialize app when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            window.app = new MCQApp();
+        });
+
+        // Make functions available globally
+        window.prevQuestion = function() {
+            if (window.app && window.app.prevQuestion) window.app.prevQuestion();
+        };
+        window.nextQuestion = function() {
+            if (window.app && window.app.nextQuestion) window.app.nextQuestion();
+        };
+        window.submitQuiz = function() {
+            if (window.app && window.app.submitQuiz) window.app.submitQuiz();
+        };
+    </script>
+</body>
+</html>
